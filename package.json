@@ -7,9 +7,13 @@
   "type": "module",
   "devDependencies": {
     "@types/node": "^20.5.7",
-    "typescript": "^5.2.2"
+    "typescript": "^5.2.2",
+    "vitest": "^3.0.9"
   },
   "dependencies": {
     "encore.dev": "^1.46.10"
+  },
+  "scripts": {
+    "test": "vitest"
   }
 }
