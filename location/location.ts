@@ -31,17 +31,15 @@ export interface ReturnLatLon {
 export const resolveLocation = api(
     { expose: true, auth: false, method: 'GET', path: '/location/:location' },
     async ({ location }: LocationParams): Promise<ReturnLatLon> => {
+        // Validate the request
         const cleanedLocation = cleanLocation(location)
-        if (cleanedLocation != location) {
-            log.info(`location="${location}" cleaned to "${cleanedLocation}"`)
-        }
         if (cleanedLocation.length < 2) {
             throw APIError.invalidArgument(
                 'location must be at least 2 characters'
             ) // HTTP 400, location too short
-        } else {
-            log.info(`Looking up location="${cleanedLocation}"`)
         }
+        log.info(`Valid request, resolving location="${cleanedLocation}"`)
+
         // First try to get the location from the local cache, aka database
         let latlon = await getFromDB(cleanedLocation)
         if (latlon && latlon.status === 'found') {
@@ -49,7 +47,7 @@ export const resolveLocation = api(
         }
         if (latlon && latlon.status === 'not_found') {
             log.info(
-                `DB stored previous not_found result from API, returning not found for location="${cleanedLocation}"`
+                `location in DB as not_found, not fetching from API again, location="${cleanedLocation}"`
             )
             throw APIError.notFound('location not found') // HTTP 404, from cache
         }
@@ -87,7 +85,6 @@ const getFromAPI = async (location: string): Promise<ReturnLatLon | null> => {
     }
     try {
         if (data.results.length > 0) {
-            log.trace('Result from API', data.results[0])
             return {
                 location,
                 full_address: data.results[0].formatted_address,
@@ -96,7 +93,7 @@ const getFromAPI = async (location: string): Promise<ReturnLatLon | null> => {
                 status: 'found',
             }
         } else {
-            log.info('No results from API', data)
+            log.info('No results from API', { location: location, data: data })
         }
     } catch (error) {
         log.warn(
@@ -108,9 +105,8 @@ const getFromAPI = async (location: string): Promise<ReturnLatLon | null> => {
 }
 const getFromDB = async (location: string): Promise<ReturnLatLon | null> => {
     try {
-        const cleanedLocation = cleanLocation(location)
         const row = await db.queryRow`
-            SELECT location, full_address, latitude, longitude FROM locations WHERE location='${cleanedLocation}'
+            SELECT * FROM locations WHERE location='${location}'
         `
         if (row) {
             return {
@@ -122,7 +118,7 @@ const getFromDB = async (location: string): Promise<ReturnLatLon | null> => {
             }
         }
     } catch (error) {
-        log.error('Error getting from DB', error)
+        logError('Error getting from DB', error)
     }
     return null
 }
@@ -137,7 +133,7 @@ const witeToDB = async (latlon: ReturnLatLon): Promise<boolean> => {
             return true
         }
     } catch (error) {
-        log.error('Error writing to DB', error)
+        logError('Error writing to DB', error)
     }
     return false
 }
@@ -145,5 +141,24 @@ const witeToDB = async (latlon: ReturnLatLon): Promise<boolean> => {
 // cleanLocation cleans the location string to make sure we don't cache very similar location lookups.
 // TODO: consider cleaning to prevent SQL injection attacks or similar.
 const cleanLocation = (location: string): string => {
-    return location.trim().toLowerCase()
+    const cleanedLocation = location.trim().toLowerCase()
+    if (cleanedLocation != location) {
+        log.info(
+            `Parameter location="${location}" cleaned to "${cleanedLocation}"`
+        )
+    }
+    return cleanedLocation
+}
+
+const logError = (msg: string, error: any) => {
+    if (error instanceof Error) {
+        log.error('1: ' + msg + ': ' + error.message)
+        console.error('1: ' + msg + ': ' + error.message)
+    } else if (typeof error === 'string') {
+        log.error('2: ' + msg + ': ' + error)
+        console.error('2: ' + msg + ': ' + error)
+    } else {
+        log.error('3: ' + msg + ': ' + error)
+        console.error('3: ' + msg + ': ' + error)
+    }
 }
