@@ -1,7 +1,18 @@
 import { api, APIError } from 'encore.dev/api'
+import { secret } from 'encore.dev/config'
 import { SQLDatabase } from 'encore.dev/storage/sqldb'
+import log from 'encore.dev/log' // error, warn, info, debug, trace
+
 // 'geocode' database is used to store the locations that are being geocoded.
 const db = new SQLDatabase('geocode', { migrations: './migrations' })
+
+//const apiKey = process.env.GOOGLE_MAPS_API_KEY
+const apiKeyFn = secret('GOOGLE_MAPS_API_KEY') // encore way
+if (apiKeyFn().length === 0) {
+    log.warn('GOOGLE_MAPS_API_KEY is not set (length=0)')
+} else {
+    log.trace(`GOOGLE_MAPS_API_KEY found, length=${apiKeyFn().length}`)
+}
 
 interface LocationParams {
     location: string // the location to get the latitude and longitude for
@@ -22,16 +33,14 @@ export const resolveLocation = api(
     async ({ location }: LocationParams): Promise<ReturnLatLon> => {
         const cleanedLocation = cleanLocation(location)
         if (cleanedLocation != location) {
-            console.log(
-                `location="${location}" cleaned to "${cleanedLocation}"`
-            )
+            log.info(`location="${location}" cleaned to "${cleanedLocation}"`)
         }
         if (cleanedLocation.length < 2) {
             throw APIError.invalidArgument(
                 'location must be at least 2 characters'
             ) // HTTP 400, location too short
         } else {
-            console.log(`Looking up location="${cleanedLocation}"`)
+            log.info(`Looking up location="${cleanedLocation}"`)
         }
         // First try to get the location from the local cache, aka database
         let latlon = await getFromDB(cleanedLocation)
@@ -39,7 +48,7 @@ export const resolveLocation = api(
             return latlon
         }
         if (latlon && latlon.status === 'not_found') {
-            console.log(
+            log.info(
                 `DB stored previous not_found result from API, returning not found for location="${cleanedLocation}"`
             )
             throw APIError.notFound('location not found') // HTTP 404, from cache
@@ -57,7 +66,7 @@ export const resolveLocation = api(
                 longitude: 0,
                 status: 'not_found',
             })
-            console.log(
+            log.info(
                 `Not found from API nor DB, returning 404 not found for location="${cleanedLocation}"`
             )
         }
@@ -68,19 +77,17 @@ export const resolveLocation = api(
 const getFromAPI = async (location: string): Promise<ReturnLatLon | null> => {
     let data: any
     try {
-        const apiKey = process.env.GOOGLE_MAPS_API_KEY
-        if (!apiKey) {
-            console.error('GOOGLE_MAPS_API_KEY is not set')
-        }
         const response = await fetch(
-            `https://maps.googleapis.com/maps/api/geocode/json?address=${location}&key=${apiKey}`
+            `https://maps.googleapis.com/maps/api/geocode/json?address=${location}&key=${apiKeyFn()}`
         )
         data = await response.json()
+        log.trace('Response from API', data)
     } catch (error) {
-        console.error('Error fetching from API', error)
+        log.error('Error fetching from API', error)
     }
     try {
         if (data.results.length > 0) {
+            log.trace('Result from API', data.results[0])
             return {
                 location,
                 full_address: data.results[0].formatted_address,
@@ -88,10 +95,12 @@ const getFromAPI = async (location: string): Promise<ReturnLatLon | null> => {
                 longitude: data.results[0].geometry.location.lng,
                 status: 'found',
             }
+        } else {
+            log.info('No results from API', data)
         }
     } catch (error) {
-        console.error(
-            'Error processing API response, format changed? ',
+        log.warn(
+            'Could not process API response, format changed? ',
             data && data.results ? data.results : data
         )
     }
@@ -113,7 +122,7 @@ const getFromDB = async (location: string): Promise<ReturnLatLon | null> => {
             }
         }
     } catch (error) {
-        console.error('Error getting from DB', error)
+        log.error('Error getting from DB', error)
     }
     return null
 }
@@ -124,11 +133,11 @@ const witeToDB = async (latlon: ReturnLatLon): Promise<boolean> => {
             INSERT INTO locations (location, full_address, latitude, longitude) VALUES ('${latlon.location}', '${latlon.full_address}', ${latlon.latitude}, ${latlon.longitude})
         `
         if (row != null) {
-            console.log('Added new location to DB Cache: ', latlon.location)
+            log.info('Added new location to DB Cache: ', latlon.location)
             return true
         }
     } catch (error) {
-        console.error('Error writing to DB', error)
+        log.error('Error writing to DB', error)
     }
     return false
 }
