@@ -137,6 +137,9 @@ describe('resolveLocation', () => {
         expect('not_found').toBe('not_found')
     })
     /*
+    resolveLocation can throw an error to return 404 not found, which is not handled well in this test.
+    Skipping for now.
+    
     test('location too short', async () => {
         const resp = await resolveLocation({ location: 'a' })
         expect(resp.status).toBe('not_found')
